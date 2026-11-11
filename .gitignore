@@ -1,0 +1,12 @@
+node_modules
+dist
+data/
+.deploy-ssh/
+.env
+.env.*
+*.log
+*.pid
+.DS_Store
+.freebuff/
+.deploy-tmp/
+*.tsbuildinfo
