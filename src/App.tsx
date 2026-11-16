@@ -14,6 +14,7 @@ import {
   Sun,
   Moon,
   Send,
+  MapPin,
 } from 'lucide-react';
 import type {
   User,
@@ -33,6 +34,7 @@ import { SettingsIntegrationsView } from './components/SettingsIntegrationsView.
 import { Button, IconButton, Badge, Avatar } from './components/ui.tsx';
 import { InstallAppButton } from './components/InstallAppButton.tsx';
 import { MyNotificationsView } from './components/MyNotificationsView.tsx';
+import { DistrictsView } from './components/DistrictsView.tsx';
 import {
   playNotificationChime,
   triggerBrowserPushNotification,
@@ -41,7 +43,7 @@ import {
 import { getInitialTheme, applyTheme, type ThemeMode } from './utils/theme.ts';
 import { authHeaders, getToken, setToken, clearToken, apiFetch } from './utils/api.ts';
 
-type NavTab = 'leads' | 'lots' | 'reminders' | 'alerts' | 'team' | 'settings';
+type NavTab = 'leads' | 'lots' | 'districts' | 'reminders' | 'alerts' | 'team' | 'settings';
 
 export function App() {
   const [users, setUsers] = useState<User[]>([]);
@@ -371,6 +373,11 @@ export function App() {
       badge: <span className="tnum text-[11px] font-semibold text-muted">{lots.length}</span>,
     },
     {
+      id: 'districts',
+      label: 'Districts',
+      icon: <MapPin className="w-4 h-4" />,
+    },
+    {
       id: 'reminders',
       label: 'Reminders',
       icon: <Bell className="w-4 h-4" />,
@@ -393,13 +400,14 @@ export function App() {
   ];
 
   // Team & Settings are admin-only. My Alerts belongs to everyone.
-  const workspaceNav = navItems.slice(0, 4);
-  const manageNav = isAdmin ? navItems.slice(4) : [];
-  const mobileNav = isAdmin ? navItems : navItems.slice(0, 4);
+  const workspaceNav = navItems.slice(0, 5);
+  const manageNav = isAdmin ? navItems.slice(5) : [];
+  const mobileNav = isAdmin ? navItems : navItems.slice(0, 5);
 
   const pageTitles: Record<NavTab, { title: string; sub: string }> = {
     leads: { title: 'Leads', sub: `${totalLotLeads} records in workspace` },
     lots: { title: 'Data Lots', sub: `${lots.length} lots · role-based access` },
+    districts: { title: 'District allocation', sub: '64 districts per campaign · one owner each' },
     reminders: {
       title: 'Reminders',
       sub: `${pendingReminders.length} pending · ${dueOrOverdueReminders.length} due soon`,
@@ -763,6 +771,14 @@ export function App() {
                 setActiveTab('leads');
               }}
               onOpenUploadModal={() => setShowUploadModal(true)}
+            />
+          )}
+
+          {activeTab === 'districts' && (
+            <DistrictsView
+              users={users}
+              currentUser={currentUser}
+              onOpenLead={(id) => setSelectedLeadId(id)}
             />
           )}
 

@@ -6,6 +6,7 @@ A team lead & lot management web app for local-business outreach. Admins upload 
 
 - **Role-based access** — Admins upload lots and control which team members can see them; members only see their assigned lots.
 - **Spreadsheet import** — `.xlsx`, `.csv`, `.xls`, `.ods` with automatic column mapping (15 columns), duplicate detection, and a built-in sample file.
+- **District allocation** — every niche campaign divides the same 64 districts (8 divisions); one district belongs to one member, with done / remaining lead counts per district and a drill-down list of the leads inside it.
 - **Lead workspace** — column selector, filters (color tag, status, city, niche, source, handled-by, rating), color-coded statuses, and an append-only comment timeline per lead.
 - **1-click outreach** — call, WhatsApp with templates (normalized numbers, `wa.me` links), email, messenger, and customized message per lead.
 - **Reminders** — in-app alerts with sound, Google Calendar deep-links, `.ics` download, Telegram bot push, and email reminders (SMTP/Resend/SendGrid via Settings).

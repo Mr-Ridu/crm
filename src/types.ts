@@ -37,6 +37,46 @@ export interface Lot {
   columns?: LotColumn[];
 }
 
+// ---- District allocation grid (one niche campaign x the 64 districts) ----
+export interface DistrictAssignee {
+  id: number;
+  name: string;
+  avatarColor: string;
+}
+
+export interface DistrictRow {
+  name: string;
+  total: number;
+  done: number;
+  remaining: number;
+  assignedUser: DistrictAssignee | null;
+}
+
+export interface DistrictDivision {
+  name: string;
+  districts: DistrictRow[];
+}
+
+export interface DistrictCampaign {
+  key: string;
+  label: string;
+  leadCount: number;
+}
+
+export interface DistrictBoard {
+  campaign: { key: string; label: string };
+  totals: {
+    districts: number;
+    covered: number;
+    assigned: number;
+    leads: number;
+    done: number;
+    remaining: number;
+  };
+  divisions: DistrictDivision[];
+  unmatched: { total: number; done: number; remaining: number; cities: string[] };
+}
+
 export interface LeadComment {
   id: number;
   leadId: number;

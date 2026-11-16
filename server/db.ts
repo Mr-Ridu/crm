@@ -113,6 +113,19 @@ export function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_lot_columns_lot_id ON lot_columns(lot_id);
 
+    -- District allocation grid: inside one niche campaign each district belongs
+    -- to exactly one team member (the PRIMARY KEY enforces the exclusivity).
+    CREATE TABLE IF NOT EXISTS district_allocations (
+      campaign TEXT NOT NULL,
+      district TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      assigned_at TEXT NOT NULL,
+      PRIMARY KEY (campaign, district),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_district_alloc_user ON district_allocations(user_id);
+
     CREATE TABLE IF NOT EXISTS lead_comments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,

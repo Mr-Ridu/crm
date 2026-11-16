@@ -6,6 +6,14 @@ import fs from 'node:fs';
 import { db, initDatabase } from './db.ts';
 import type { IntegrationSettings, Role } from '../src/types.ts';
 import { DEFAULT_INTEGRATION_SETTINGS } from '../src/types.ts';
+import {
+  BD_DIVISIONS,
+  BD_DISTRICTS,
+  BD_DISTRICT_TOTAL,
+  campaignKey,
+  campaignLabel,
+  detectDistrict,
+} from '../src/utils/districts.ts';
 
 initDatabase();
 
@@ -820,6 +828,256 @@ app.delete('/api/lots/:id', (req, res) => {
   const lotId = Number(req.params.id);
   db.prepare('DELETE FROM lots WHERE id = ?').run(lotId);
   res.json({ success: true });
+});
+
+// ==========================================
+// 2b. DISTRICT ALLOCATION (niche campaign x 64 districts)
+// ==========================================
+
+// A lead reaches its district through its lot name first — that is how the team
+// files their sheets ("Lot — Diagnostic Jamalpur") — and through its address and
+// city as a fallback for lots that span several districts.
+function campaignLeadRows(accessibleLotIds: number[]): any[] {
+  if (accessibleLotIds.length === 0) return [];
+  const placeholders = accessibleLotIds.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT l.id, l.lot_id, lt.name AS lot_name, l.business_name, l.city, l.address,
+              l.niche, l.status, l.phone, l.color_tag, l.handled_by_user_id,
+              u.name AS handled_name, u.avatar_color
+       FROM leads l
+       INNER JOIN lots lt ON lt.id = l.lot_id
+       LEFT JOIN users u ON u.id = l.handled_by_user_id
+       WHERE l.lot_id IN (${placeholders})`
+    )
+    .all(...accessibleLotIds) as any[];
+}
+
+/** Adds the campaign key and resolved district to every lead row. */
+function withCampaignDistricts(rows: any[]) {
+  const lotDistricts = new Map<number, string | null>();
+  return rows.map((row) => {
+    if (!lotDistricts.has(row.lot_id)) {
+      lotDistricts.set(row.lot_id, detectDistrict(row.lot_name));
+    }
+    const district = lotDistricts.get(row.lot_id) || detectDistrict(row.address, row.city);
+    return { ...row, campaign_key: campaignKey(row.niche), district };
+  });
+}
+
+function districtAssignments(campaign: string) {
+  const rows = db
+    .prepare(
+      `SELECT da.district, u.id, u.name, u.avatar_color
+       FROM district_allocations da
+       INNER JOIN users u ON u.id = da.user_id
+       WHERE da.campaign = ?`
+    )
+    .all(campaign) as any[];
+  const map = new Map<string, { id: number; name: string; avatarColor: string }>();
+  for (const r of rows) {
+    map.set(r.district, { id: Number(r.id), name: r.name, avatarColor: r.avatar_color });
+  }
+  return map;
+}
+
+app.get('/api/districts/campaigns', (req, res) => {
+  const current = getCurrentUser(req);
+  if (!current) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const counts = new Map<string, number>();
+  for (const row of campaignLeadRows(getAccessibleLotIds(current))) {
+    const key = campaignKey(row.niche);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  res.json(
+    [...counts.entries()]
+      .map(([key, leadCount]) => ({ key, label: campaignLabel(key), leadCount }))
+      .sort((a, b) => b.leadCount - a.leadCount)
+  );
+});
+
+app.get('/api/districts', (req, res) => {
+  const current = getCurrentUser(req);
+  if (!current) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const rows = withCampaignDistricts(campaignLeadRows(getAccessibleLotIds(current)));
+
+  // No campaign requested -> the one with the most leads.
+  let key = req.query.campaign === undefined ? '' : String(req.query.campaign);
+  if (req.query.campaign === undefined) {
+    const counts = new Map<string, number>();
+    for (const row of rows) counts.set(row.campaign_key, (counts.get(row.campaign_key) || 0) + 1);
+    key = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+  }
+
+  const scoped = rows.filter((r) => r.campaign_key === key);
+  const assignments = districtAssignments(key);
+
+  const perDistrict = new Map<string, { total: number; done: number }>();
+  const unmatchedCities = new Map<string, number>();
+  let unmatchedTotal = 0;
+  let unmatchedDone = 0;
+  let done = 0;
+
+  for (const row of scoped) {
+    const isDone = row.status !== 'New';
+    if (isDone) done += 1;
+    if (!row.district) {
+      unmatchedTotal += 1;
+      if (isDone) unmatchedDone += 1;
+      const label = String(row.city || '').trim() || 'Unknown location';
+      unmatchedCities.set(label, (unmatchedCities.get(label) || 0) + 1);
+      continue;
+    }
+    const cur = perDistrict.get(row.district) || { total: 0, done: 0 };
+    cur.total += 1;
+    if (isDone) cur.done += 1;
+    perDistrict.set(row.district, cur);
+  }
+
+  const divisions = BD_DIVISIONS.map((division) => ({
+    name: division.name,
+    districts: division.districts.map((name) => {
+      const stat = perDistrict.get(name) || { total: 0, done: 0 };
+      return {
+        name,
+        total: stat.total,
+        done: stat.done,
+        remaining: stat.total - stat.done,
+        assignedUser: assignments.get(name) || null,
+      };
+    }),
+  }));
+
+  res.json({
+    campaign: { key, label: campaignLabel(key) },
+    totals: {
+      districts: BD_DISTRICT_TOTAL,
+      covered: perDistrict.size,
+      assigned: assignments.size,
+      leads: scoped.length,
+      done,
+      remaining: scoped.length - done,
+    },
+    divisions,
+    unmatched: {
+      total: unmatchedTotal,
+      done: unmatchedDone,
+      remaining: unmatchedTotal - unmatchedDone,
+      cities: [...unmatchedCities.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([city, count]) => `${city} (${count})`),
+    },
+  });
+});
+
+// Leads of one district inside a campaign — untouched leads first, so the list
+// opens on what is still left to call.
+app.get('/api/districts/leads', (req, res) => {
+  const current = getCurrentUser(req);
+  if (!current) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const key = String(req.query.campaign || '');
+  const district = String(req.query.district || '');
+  if (!district) {
+    res.json([]);
+    return;
+  }
+
+  const rows = withCampaignDistricts(campaignLeadRows(getAccessibleLotIds(current)))
+    .filter((r) => r.campaign_key === key)
+    .filter((r) => (district === '__none' ? !r.district : r.district === district))
+    .sort(
+      (a, b) =>
+        (a.status === 'New' ? 0 : 1) - (b.status === 'New' ? 0 : 1) || Number(b.id) - Number(a.id)
+    )
+    .slice(0, 400);
+
+  res.json(
+    rows.map((r) => ({
+      id: r.id,
+      businessName: r.business_name,
+      status: r.status,
+      colorTag: r.color_tag,
+      phone: r.phone,
+      city: r.city,
+      lotName: r.lot_name,
+      handledByUserId: r.handled_by_user_id,
+      handledByName: r.handled_name,
+      handledByAvatarColor: r.avatar_color,
+    }))
+  );
+});
+
+app.put('/api/districts/assign', (req, res) => {
+  const current = getCurrentUser(req);
+  if (!current || current.role !== 'admin') {
+    res.status(403).json({ error: 'Only Admin can allocate districts' });
+    return;
+  }
+
+  const campaign = String(req.body?.campaign ?? '').trim().slice(0, 80);
+  const district = String(req.body?.district ?? '').trim();
+  if (!BD_DISTRICTS.includes(district)) {
+    res.status(400).json({ error: 'Unknown district' });
+    return;
+  }
+
+  const rawUserId = req.body?.userId;
+  const userId =
+    rawUserId === null || rawUserId === undefined || rawUserId === 0 ? null : Number(rawUserId);
+
+  if (userId === null) {
+    db.prepare('DELETE FROM district_allocations WHERE campaign = ? AND district = ?').run(
+      campaign,
+      district
+    );
+    res.json({ success: true, assignedUser: null });
+    return;
+  }
+
+  const user = db
+    .prepare('SELECT id, name, avatar_color FROM users WHERE id = ? AND active = 1')
+    .get(userId) as { id: number; name: string; avatar_color: string } | undefined;
+  if (!user) {
+    res.status(400).json({ error: 'Unknown team member' });
+    return;
+  }
+
+  // Exclusivity: a district already owned by someone else must be removed from
+  // that member first, so nobody calls the same shops in parallel.
+  const existing = db
+    .prepare(
+      `SELECT u.name FROM district_allocations da
+       INNER JOIN users u ON u.id = da.user_id
+       WHERE da.campaign = ? AND da.district = ?`
+    )
+    .get(campaign, district) as { name: string } | undefined;
+  if (existing && existing.name !== user.name) {
+    res.status(409).json({ error: `Already assigned to ${existing.name}` });
+    return;
+  }
+
+  db.prepare(
+    `INSERT INTO district_allocations (campaign, district, user_id, assigned_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(campaign, district)
+     DO UPDATE SET user_id = excluded.user_id, assigned_at = excluded.assigned_at`
+  ).run(campaign, district, userId, new Date().toISOString());
+
+  res.json({
+    success: true,
+    assignedUser: { id: Number(user.id), name: user.name, avatarColor: user.avatar_color },
+  });
 });
 
 // ==========================================
