@@ -887,16 +887,58 @@ app.get('/api/districts/campaigns', (req, res) => {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  const counts = new Map<string, number>();
+  const found = new Map<string, { key: string; label: string; leadCount: number }>();
   for (const row of campaignLeadRows(getAccessibleLotIds(current))) {
     const key = campaignKey(row.niche);
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const existing = found.get(key);
+    if (existing) existing.leadCount += 1;
+    else found.set(key, { key, label: campaignLabel(key), leadCount: 1 });
   }
-  res.json(
-    [...counts.entries()]
-      .map(([key, leadCount]) => ({ key, label: campaignLabel(key), leadCount }))
-      .sort((a, b) => b.leadCount - a.leadCount)
+
+  // Hand-made campaigns show up even before their first lead is uploaded.
+  const manual = db.prepare('SELECT key, label FROM campaigns').all() as any[];
+  for (const row of manual) {
+    const existing = found.get(row.key);
+    if (existing) existing.label = row.label;
+    else found.set(row.key, { key: row.key, label: row.label, leadCount: 0 });
+  }
+
+  res.json([...found.values()].sort((a, b) => b.leadCount - a.leadCount));
+});
+
+// Create an empty niche campaign so districts can be allocated before upload.
+app.post('/api/districts/campaigns', (req, res) => {
+  const current = getCurrentUser(req);
+  if (!current || current.role !== 'admin') {
+    res.status(403).json({ error: 'Only Admin can create a niche campaign' });
+    return;
+  }
+
+  const name = String(req.body?.name || '').trim();
+  const key = campaignKey(name);
+  if (!key) {
+    res.status(400).json({ error: 'Give the niche a name' });
+    return;
+  }
+
+  const existingKeys = new Set(
+    campaignLeadRows(getAccessibleLotIds(current)).map((r) => campaignKey(r.niche))
   );
+  const manual = db.prepare('SELECT label FROM campaigns WHERE key = ?').get(key) as
+    | { label: string }
+    | undefined;
+  if (manual || existingKeys.has(key)) {
+    res.status(409).json({ error: 'This niche campaign already exists' });
+    return;
+  }
+
+  const label = name.slice(0, 60);
+  db.prepare('INSERT INTO campaigns (key, label, created_at) VALUES (?, ?, ?)').run(
+    key,
+    label,
+    new Date().toISOString()
+  );
+  res.json({ key, label, leadCount: 0 });
 });
 
 app.get('/api/districts', (req, res) => {
@@ -956,7 +998,13 @@ app.get('/api/districts', (req, res) => {
   }));
 
   res.json({
-    campaign: { key, label: campaignLabel(key) },
+    campaign: {
+      key,
+      label:
+        (db.prepare('SELECT label FROM campaigns WHERE key = ?').get(key) as
+          | { label: string }
+          | undefined)?.label || campaignLabel(key),
+    },
     totals: {
       districts: BD_DISTRICT_TOTAL,
       covered: perDistrict.size,

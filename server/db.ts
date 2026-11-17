@@ -126,6 +126,15 @@ export function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_district_alloc_user ON district_allocations(user_id);
 
+    -- Niche campaigns created by hand (before their leads are uploaded), so the
+    -- districts can be divided up front. Campaigns with leads are derived from
+    -- leads.niche and do not need a row here.
+    CREATE TABLE IF NOT EXISTS campaigns (
+      key TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS lead_comments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,

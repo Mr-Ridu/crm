@@ -374,7 +374,7 @@ export function App() {
     },
     {
       id: 'districts',
-      label: 'Districts',
+      label: 'Lead tracking',
       icon: <MapPin className="w-4 h-4" />,
     },
     {
@@ -407,7 +407,7 @@ export function App() {
   const pageTitles: Record<NavTab, { title: string; sub: string }> = {
     leads: { title: 'Leads', sub: `${totalLotLeads} records in workspace` },
     lots: { title: 'Data Lots', sub: `${lots.length} lots · role-based access` },
-    districts: { title: 'District allocation', sub: '64 districts per campaign · one owner each' },
+    districts: { title: 'Lead tracking', sub: '64 districts per campaign · one owner each' },
     reminders: {
       title: 'Reminders',
       sub: `${pendingReminders.length} pending · ${dueOrOverdueReminders.length} due soon`,

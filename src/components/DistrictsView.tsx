@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ChevronRight, MapPin, Search, Users } from 'lucide-react';
+import { CheckCircle2, ChevronRight, MapPin, Plus, Search, Users } from 'lucide-react';
 import type { DistrictBoard, DistrictCampaign, User } from '../types.ts';
 import {
   Avatar,
@@ -8,6 +8,7 @@ import {
   Card,
   EmptyState,
   InlineAlert,
+  Modal,
   ModalHeader,
   ModalShell,
   PageHeader,
@@ -67,6 +68,11 @@ export const DistrictsView: React.FC<{
   const [leadsLoading, setLeadsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+
+  const [showNewNiche, setShowNewNiche] = useState(false);
+  const [nicheName, setNicheName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const loadCampaigns = useCallback(async () => {
     const resp = await apiFetch('/api/districts/campaigns');
@@ -145,6 +151,29 @@ export const DistrictsView: React.FC<{
     await loadBoard(campaign);
   };
 
+  const createCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = nicheName.trim();
+    if (!name) return;
+    setCreating(true);
+    setCreateError('');
+    const resp = await apiFetch('/api/districts/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    setCreating(false);
+    if (!resp.ok) {
+      setCreateError(data.error || 'Could not create the niche campaign.');
+      return;
+    }
+    setCampaigns((prev) => [...prev, data]);
+    setCampaign(data.key);
+    setNicheName('');
+    setShowNewNiche(false);
+  };
+
   const openRow = useMemo(() => {
     if (!board || openDistrict === null) return null;
     for (const division of board.divisions) {
@@ -198,8 +227,19 @@ export const DistrictsView: React.FC<{
     <div className="space-y-4">
       <PageHeader
         eyebrow="Coverage"
-        title="District allocation"
-        description="Every niche divides the same 64 districts. One district belongs to one member, so nobody calls the same shops twice — and you can always see what is finished and what is left."
+        title="Lead tracking"
+        description="Every niche campaign divides the same 64 districts. One district belongs to one member, so nobody calls the same shops twice — and you can always see what is finished and what is left."
+        actions={
+          isAdmin ? (
+            <Button variant="primary" onClick={() => {
+              setNicheName('');
+              setCreateError('');
+              setShowNewNiche(true);
+            }}>
+              <Plus className="w-4 h-4" /> New niche
+            </Button>
+          ) : undefined
+        }
       />
 
       {error && <InlineAlert tone="danger">{error}</InlineAlert>}
@@ -388,6 +428,42 @@ export const DistrictsView: React.FC<{
           )}
         </>
       )}
+
+      {/* Create an empty niche campaign (districts can be allocated before upload) */}
+      <Modal
+        open={showNewNiche}
+        onClose={() => setShowNewNiche(false)}
+        title="New niche campaign"
+        description="Adds a campaign with all 64 districts empty, so you can divide them up before uploading the leads."
+      >
+        <form onSubmit={createCampaign} className="space-y-3">
+          {createError && <InlineAlert tone="danger">{createError}</InlineAlert>}
+          <div>
+            <label htmlFor="niche-name" className="block text-[12px] font-semibold text-ink mb-1">
+              Niche / product name
+            </label>
+            <TextInput
+              id="niche-name"
+              value={nicheName}
+              onChange={(e) => setNicheName(e.target.value)}
+              placeholder="Cake, Diagnostic, Boutique, Ornaments…"
+              className="w-full"
+              autoFocus
+            />
+            <p className="mt-1 text-[12px] text-muted">
+              Leads whose Niche column matches this name join the same campaign automatically.
+            </p>
+          </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button type="button" variant="secondary" onClick={() => setShowNewNiche(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={creating || !nicheName.trim()}>
+              {creating ? 'Creating…' : 'Create campaign'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* District panel: owner + leads that are done / left */}
       {openDistrict !== null && (
